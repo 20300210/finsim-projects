@@ -19,11 +19,11 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from valor_dinero import valor_futuro, valor_presente, valor_futuro_anualidad, ajustar_por_inflacion
-from evaluacion import evaluar_proyecto
-from prestamos import amortizacion_francesa, amortizacion_alemana, resumen_comparativo
-from portafolio import Activo, simular_portafolio_monte_carlo, resumen_percentiles, probabilidad_de_meta, ESCENARIOS_MACRO
-from posgrado import (
+from modulos.valor_dinero import valor_futuro, valor_presente, valor_futuro_anualidad, ajustar_por_inflacion
+from modulos.evaluacion import evaluar_proyecto
+from modulos.prestamos import amortizacion_francesa, amortizacion_alemana, resumen_comparativo
+from modulos.portafolio import Activo, simular_portafolio_monte_carlo, resumen_percentiles, probabilidad_de_meta, ESCENARIOS_MACRO
+from modulos.posgrado import (
     capacidad_pago,
     nivel_endeudamiento,
     escenario_disminucion_ingreso,

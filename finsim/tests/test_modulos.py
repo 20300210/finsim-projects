@@ -7,11 +7,11 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from valor_dinero import valor_futuro, valor_presente, valor_futuro_anualidad
-from evaluacion import van, tir, payback, evaluar_proyecto
-from prestamos import amortizacion_francesa, amortizacion_alemana
-from portafolio import Activo, simular_portafolio_monte_carlo, probabilidad_de_meta
-from posgrado import (
+from modulos.valor_dinero import valor_futuro, valor_presente, valor_futuro_anualidad
+from modulos.evaluacion import van, tir, payback, evaluar_proyecto
+from modulos.prestamos import amortizacion_francesa, amortizacion_alemana
+from modulos.portafolio import Activo, simular_portafolio_monte_carlo, probabilidad_de_meta
+from modulos.posgrado import (
     costo_total_credito,
     capacidad_pago,
     nivel_endeudamiento,

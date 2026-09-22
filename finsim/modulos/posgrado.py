@@ -24,7 +24,7 @@ framework), siguiendo el mismo patrón ya auditado en el resto del proyecto.
 from typing import List, Optional
 import pandas as pd
 
-from prestamos import amortizacion_francesa
+from modulos.prestamos import amortizacion_francesa
 
 
 # ----------------------------------------------------------------------
