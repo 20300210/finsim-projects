@@ -46,6 +46,15 @@ from modulos.prestamos import amortizacion_francesa
 #      Fuente: misma nota de Superintendencia Financiera / La República
 #      (corte: 17 de julio de 2026)
 #
+#   4. Bancolombia (Sufi) — Crédito educativo: 28,32% efectivo anual
+#      Fuente: misma nota de Superintendencia Financiera / La República
+#      (corte: 17 de julio de 2026)
+#
+#   5. BBVA Colombia — Crédito Educativo: 29,22% efectivo anual
+#      Fuente: tabla oficial de tasas de créditos de consumo de BBVA Colombia
+#      (vigente desde el 5 de septiembre de 2026). Plazo oficial: 6-12 meses.
+#      https://www.bbva.com.co/content/dam/public-web/colombia/documents/personas/prestamos/consumo/DO-01-Tasas-creditos-consumo.pdf
+#
 # IMPORTANTE — estas tasas cambian con el tiempo y NO deben tomarse como
 # vigentes indefinidamente:
 #   - La tasa de ICETEX está indexada al IPC y se recalcula cada enero
@@ -60,6 +69,8 @@ ALTERNATIVAS_EJEMPLO_COLOMBIA = [
     {"nombre": "ICETEX - Posgrado País", "monto": 20_000_000, "tasa_anual": 0.1351, "plazo_meses": 60},
     {"nombre": "Davivienda - Crédito educativo", "monto": 20_000_000, "tasa_anual": 0.1520, "plazo_meses": 48},
     {"nombre": "Bancoomeva - Crédito educativo", "monto": 20_000_000, "tasa_anual": 0.2258, "plazo_meses": 36},
+    {"nombre": "Bancolombia - Sufi", "monto": 20_000_000, "tasa_anual": 0.2832, "plazo_meses": 48},
+    {"nombre": "BBVA Colombia - Crédito educativo", "monto": 20_000_000, "tasa_anual": 0.2922, "plazo_meses": 12},
 ]
 
 # Metadatos de trazabilidad: de dónde salió cada tasa y cuándo se verificó.
@@ -89,6 +100,22 @@ FUENTES_TASAS_COLOMBIA = {
         "url": "https://www.larepublica.co/finanzas/las-tasas-de-interes-para-adquirir-creditos-educativos-van-desde-15-2-hasta-28-3-a-julio-4444914",
         "vigente_para": "corte 17 de julio de 2026",
         "nota": "Tasa propia de la entidad, no indexada al IPC; puede cambiar sin aviso previo.",
+    },
+    "Bancolombia - Sufi": {
+        "tasa_ea": 0.2832,
+        "descripcion": "Tasa reportada a la Superintendencia Financiera de Colombia para crédito educativo",
+        "fuente": "Superintendencia Financiera de Colombia, vía La República",
+        "url": "https://www.larepublica.co/finanzas/las-tasas-de-interes-para-adquirir-creditos-educativos-van-desde-15-2-hasta-28-3-a-julio-4444914",
+        "vigente_para": "corte 17 de julio de 2026",
+        "nota": "Operado por Sufi (marca de crédito de consumo del Grupo Bancolombia); ofrece líneas de corto plazo (6-12 meses) y largo plazo (varios años, según el programa).",
+    },
+    "BBVA Colombia - Crédito educativo": {
+        "tasa_ea": 0.2922,
+        "descripcion": "Tasa política (fija) para la línea 'Crédito Educativo', dentro de créditos de consumo",
+        "fuente": "BBVA Colombia — tabla oficial de tasas de créditos de consumo",
+        "url": "https://www.bbva.com.co/content/dam/public-web/colombia/documents/personas/prestamos/consumo/DO-01-Tasas-creditos-consumo.pdf",
+        "vigente_para": "vigente desde el 5 de septiembre de 2026",
+        "nota": "Plazo oficial de este producto: 6 a 12 meses únicamente (el más corto de las alternativas comparadas); tasa fija durante toda la vigencia.",
     },
 }
 

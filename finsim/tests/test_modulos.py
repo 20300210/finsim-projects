@@ -7,7 +7,10 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from modulos.valor_dinero import valor_futuro, valor_presente, valor_futuro_anualidad
+from modulos.valor_dinero import (
+    valor_futuro, valor_presente, valor_futuro_anualidad,
+    periodos_necesarios_para_meta, tasa_periodica_equivalente, FRECUENCIAS_APORTE,
+)
 from modulos.evaluacion import van, tir, payback, evaluar_proyecto
 from modulos.prestamos import amortizacion_francesa, amortizacion_alemana
 from modulos.portafolio import Activo, simular_portafolio_monte_carlo, probabilidad_de_meta
@@ -18,6 +21,7 @@ from modulos.posgrado import (
     escenario_disminucion_ingreso,
     sensibilidad_tasa,
     comparar_alternativas,
+    ALTERNATIVAS_EJEMPLO_COLOMBIA,
 )
 
 
@@ -38,6 +42,87 @@ def test_anualidad():
     resultado = valor_futuro_anualidad(100, 0.05, 3)
     assert abs(resultado - 315.25) < 0.01
     print("OK: valor_futuro_anualidad")
+
+
+def test_periodos_necesarios_es_inversa_de_valor_futuro_anualidad():
+    # Si con 13.27 años llego a cierto monto, pedir "cuántos años para ese
+    # monto" debe devolverme ~13.27 de vuelta (son operaciones inversas).
+    capital, aporte, tasa = 1000, 100, 0.08
+    n_original = 13.27
+    meta = valor_futuro(capital, tasa, n_original) + valor_futuro_anualidad(aporte, tasa, n_original)
+    n_calculado = periodos_necesarios_para_meta(meta, capital, aporte, tasa)
+    assert abs(n_calculado - n_original) < 0.01
+    print(f"OK: periodos_necesarios_para_meta es inversa de valor_futuro_anualidad (n={n_calculado:.2f})")
+
+
+def test_periodos_necesarios_meta_ya_alcanzada_con_capital():
+    # Si el capital inicial ya es mayor que la meta, no se necesita ningún periodo
+    resultado = periodos_necesarios_para_meta(meta=500, capital=1000, aporte=100, tasa=0.08)
+    assert resultado == 0.0
+    print("OK: periodos_necesarios_para_meta devuelve 0 si el capital ya alcanza la meta")
+
+
+def test_periodos_necesarios_con_tasa_cero():
+    # Sin interés, es una simple resta y división: (meta - capital) / aporte
+    resultado = periodos_necesarios_para_meta(meta=5000, capital=1000, aporte=200, tasa=0)
+    assert abs(resultado - 20.0) < 1e-6  # (5000-1000)/200 = 20
+    print(f"OK: periodos_necesarios_para_meta con tasa 0% ({resultado} periodos)")
+
+
+def test_tasa_periodica_equivalente_compone_correctamente():
+    # Si convierto 8% anual a mensual y luego compongo 12 veces, debo
+    # recuperar exactamente el 8% original (esa es la definición de "tasa
+    # efectiva equivalente" -- a diferencia de dividir entre 12, que NO
+    # daría el mismo rendimiento anual).
+    tasa_anual = 0.08
+    tasa_mensual = tasa_periodica_equivalente(tasa_anual, 12)
+    tasa_anual_recompuesta = (1 + tasa_mensual) ** 12 - 1
+    assert abs(tasa_anual_recompuesta - tasa_anual) < 1e-9
+    print(f"OK: tasa_periodica_equivalente compone correctamente (mensual={tasa_mensual*100:.4f}%)")
+
+
+def test_seguridad_periodos_necesarios_rechaza_meta_negativa():
+    try:
+        periodos_necesarios_para_meta(meta=-100, capital=0, aporte=100, tasa=0.05)
+        assert False, "Debió lanzar ValueError con meta negativa"
+    except ValueError:
+        print("OK (seguridad): periodos_necesarios_para_meta rechaza meta negativa")
+
+
+def test_seguridad_periodos_necesarios_rechaza_meta_imposible():
+    try:
+        # Sin capital, sin aporte, sin tasa -> nunca se llega a ninguna meta positiva
+        periodos_necesarios_para_meta(meta=1000, capital=0, aporte=0, tasa=0)
+        assert False, "Debió lanzar ValueError: meta imposible de alcanzar"
+    except ValueError:
+        print("OK (seguridad): periodos_necesarios_para_meta rechaza una meta matemáticamente imposible")
+
+
+def test_tasa_periodica_equivalente_preserva_tasa_anual():
+    # Si convierto 8% E.A. a mensual y luego compongo 12 veces, debo volver a 8%
+    tasa_anual = 0.08
+    tasa_mensual = tasa_periodica_equivalente(tasa_anual, 12)
+    tasa_anual_reconstruida = (1 + tasa_mensual) ** 12 - 1
+    assert abs(tasa_anual_reconstruida - tasa_anual) < 1e-9
+    print(f"OK: tasa_periodica_equivalente preserva la tasa anual (mensual={tasa_mensual*100:.4f}%)")
+
+
+def test_frecuencia_mas_frecuente_llega_mas_rapido_en_anios():
+    # Con el mismo aporte "por periodo", aportar más seguido (mensual) debe
+    # acumular más rápido en AÑOS que aportar solo una vez al año, porque
+    # hay más inyecciones de dinero por año calendario.
+    capital, aporte, tasa_anual, meta = 10_000_000, 200_000, 0.08, 100_000_000
+
+    tasa_anual_periodo = tasa_periodica_equivalente(tasa_anual, 1)
+    periodos_anual = periodos_necesarios_para_meta(meta, capital, aporte, tasa_anual_periodo)
+    anios_anual = periodos_anual / 1
+
+    tasa_mensual_periodo = tasa_periodica_equivalente(tasa_anual, 12)
+    periodos_mensual = periodos_necesarios_para_meta(meta, capital, aporte, tasa_mensual_periodo)
+    anios_mensual = periodos_mensual / 12
+
+    assert anios_mensual < anios_anual
+    print(f"OK: aportar mensual ({anios_mensual:.2f} años) llega más rápido que aportar anual ({anios_anual:.2f} años) con el mismo monto por aporte")
 
 
 def test_van_positivo():
@@ -225,10 +310,26 @@ def test_seguridad_capacidad_pago_rechaza_ingreso_cero():
         print("OK (seguridad): capacidad_pago rechaza ingreso mensual <= 0")
 
 
+def test_comparar_5_alternativas_colombia_reales():
+    """Verifica que las 5 alternativas reales (ICETEX, Davivienda, Bancoomeva,
+    Bancolombia/Sufi, BBVA) se puedan comparar juntas sin errores, y que el
+    ranking por costo total tenga sentido (todas las tasas son > 0 y < 1)."""
+    resultado = comparar_alternativas(ALTERNATIVAS_EJEMPLO_COLOMBIA, ingreso_mensual=4_000_000)
+    assert len(resultado) == 5
+    assert set(resultado["nombre"]) == {a["nombre"] for a in ALTERNATIVAS_EJEMPLO_COLOMBIA}
+    # El costo total debe ser estrictamente creciente en la fila (orden ascendente)
+    assert resultado["costo_total"].is_monotonic_increasing
+    print("OK: comparar_alternativas con las 5 alternativas reales de Colombia (ICETEX, Davivienda, Bancoomeva, Bancolombia/Sufi, BBVA)")
+
+
 if __name__ == "__main__":
     test_valor_futuro()
     test_valor_presente()
     test_anualidad()
+    test_periodos_necesarios_es_inversa_de_valor_futuro_anualidad()
+    test_periodos_necesarios_meta_ya_alcanzada_con_capital()
+    test_periodos_necesarios_con_tasa_cero()
+    test_tasa_periodica_equivalente_compone_correctamente()
     test_van_positivo()
     test_tir_conocida()
     test_payback()
@@ -251,4 +352,7 @@ if __name__ == "__main__":
     test_comparar_alternativas_ordena_por_costo_total()
     test_seguridad_comparar_alternativas_rechaza_nombres_duplicados()
     test_seguridad_capacidad_pago_rechaza_ingreso_cero()
+    test_comparar_5_alternativas_colombia_reales()
+    test_seguridad_periodos_necesarios_rechaza_meta_negativa()
+    test_seguridad_periodos_necesarios_rechaza_meta_imposible()
     print("\n✅ Todas las pruebas (funcionales + seguridad) pasaron correctamente.")

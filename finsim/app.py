@@ -15,11 +15,12 @@ Para correr la app:
 """
 
 import logging
+import math
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from modulos.valor_dinero import valor_futuro, valor_presente, valor_futuro_anualidad, ajustar_por_inflacion
+from modulos.valor_dinero import valor_futuro, valor_presente, valor_futuro_anualidad, ajustar_por_inflacion, periodos_necesarios_para_meta, tasa_periodica_equivalente, FRECUENCIAS_APORTE
 from modulos.evaluacion import evaluar_proyecto
 from modulos.prestamos import amortizacion_francesa, amortizacion_alemana, resumen_comparativo
 from modulos.portafolio import Activo, simular_portafolio_monte_carlo, resumen_percentiles, probabilidad_de_meta, ESCENARIOS_MACRO
@@ -60,8 +61,35 @@ def manejar_error(contexto: str, excepcion: Exception) -> None:
 
 st.set_page_config(page_title="FinSim - Simulador Financiero", page_icon="💰", layout="wide")
 
+# --------------------------------------------------------------------------
+# Nombre del usuario: se pide una sola vez en la barra lateral y se guarda
+# en session_state para que persista mientras la persona navega entre las
+# 5 pestañas (Streamlit vuelve a correr todo el script en cada interacción,
+# así que sin session_state se perdería en cada clic).
+# max_chars limita el tamaño por higiene de UI; Streamlit ya escapa el
+# texto automáticamente al mostrarlo (no usamos unsafe_allow_html en
+# ningún punto de la app), así que no hay riesgo de inyección de HTML/JS
+# aunque el nombre incluya caracteres especiales.
+# --------------------------------------------------------------------------
+if "nombre_usuario" not in st.session_state:
+    st.session_state["nombre_usuario"] = ""
+
+with st.sidebar:
+    st.markdown("### 👤 Tus datos")
+    st.session_state["nombre_usuario"] = st.text_input(
+        "¿Cómo te llamas?",
+        value=st.session_state["nombre_usuario"],
+        placeholder="Ej. Camila",
+        max_chars=60,
+    ).strip()
+    if st.session_state["nombre_usuario"]:
+        st.caption(f"Bienvenido/a, {st.session_state['nombre_usuario']} 👋")
+
+nombre = st.session_state["nombre_usuario"]
+saludo = f", {nombre}" if nombre else ""  # ej: ", Camila" o "" si no puso nombre
+
 st.title("💰 FinSim: Simulador Financiero")
-st.caption("Proyecto universitario · Finanzas · Simulación de decisiones financieras")
+st.caption(f"Hola{saludo} 👋 · Proyecto universitario · Finanzas · Simulación de decisiones financieras")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📈 Valor del Dinero",
@@ -76,36 +104,88 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ----------------------------------------------------------------------
 with tab1:
     st.header("Valor del Dinero en el Tiempo")
-    st.write("Calcula cómo crece un capital con interés compuesto y aportes periódicos.")
+    st.write(f"Calcula cómo crece un capital con interés compuesto y aportes periódicos{saludo}.")
+
+    frecuencia = st.selectbox(
+        "¿Con qué frecuencia harías los aportes?",
+        options=list(FRECUENCIAS_APORTE.keys()),
+        index=0,  # "Anual" por defecto, para no romper el comportamiento anterior
+        help="La tasa de interés que pongas abajo siempre es ANUAL — el simulador la convierte automáticamente a la frecuencia que elijas aquí, sin que tengas que hacer esa conversión tú mismo.",
+    )
+    periodos_por_anio = FRECUENCIAS_APORTE[frecuencia]
+    etiqueta_frecuencia = frecuencia.lower()  # "anual", "trimestral", "mensual", "quincenal"
 
     col1, col2 = st.columns(2)
     with col1:
         capital = st.number_input("Capital inicial ($)", min_value=0.0, value=1000.0, step=100.0)
-        aporte = st.number_input("Aporte periódico ($)", min_value=0.0, value=100.0, step=10.0)
+        aporte = st.number_input(f"Aporte {etiqueta_frecuencia} ($)", min_value=0.0, value=100.0, step=10.0)
     with col2:
         tasa_anual = st.slider("Tasa de interés anual (%)", 0.0, 30.0, 8.0) / 100
         anios = st.slider("Número de años", 1, 50, 10)
 
     inflacion = st.slider("Inflación anual esperada (%) — para ver el valor real", 0.0, 20.0, 3.0) / 100
+    meta_ahorro = st.number_input(
+        "🎯 Meta de ahorro (opcional, $)", min_value=0.0, value=0.0, step=100_000.0,
+        help="Si tienes un monto objetivo en mente, primero te decimos cuántos años Y cuántos aportes (en la frecuencia que elegiste arriba) necesitarías hacer para alcanzarlo.",
+    )
 
     try:
-        vf_capital = valor_futuro(capital, tasa_anual, anios)
-        vf_aportes = valor_futuro_anualidad(aporte, tasa_anual, anios)
+        # La tasa que ingresa el usuario siempre es EFECTIVA ANUAL. Se convierte
+        # a la tasa equivalente de la frecuencia elegida (no es una simple
+        # división — ver tasa_periodica_equivalente() para el porqué).
+        tasa_periodo = tasa_periodica_equivalente(tasa_anual, periodos_por_anio)
+        n_periodos_totales = anios * periodos_por_anio  # ej. 8 años x 12 = 96 aportes mensuales
+
+        # ------------------------------------------------------------------
+        # PASO 1: si el usuario puso una meta, calculamos primero cuántos
+        # APORTES (en la frecuencia elegida) y cuántos AÑOS necesitaría para
+        # alcanzarla — antes de calcular cuánto acumula con los aportes que
+        # ya definió. Es la operación inversa: en vez de "con n aportes,
+        # ¿cuánto junto?", responde "para juntar esto, ¿cuántos necesito?".
+        # ------------------------------------------------------------------
+        if meta_ahorro > 0:
+            periodos_meta = periodos_necesarios_para_meta(meta_ahorro, capital, aporte, tasa_periodo)
+            if periodos_meta <= 0:
+                st.info(
+                    f"🎯 Con tu capital inicial de ${capital:,.0f}{saludo} ya alcanzas o superas tu "
+                    f"meta de ${meta_ahorro:,.0f} — ¡ni siquiera necesitas hacer aportes adicionales!"
+                )
+            else:
+                aportes_redondeados = math.ceil(periodos_meta)
+                anios_equivalentes = periodos_meta / periodos_por_anio
+                st.info(
+                    f"🎯 Para alcanzar tu meta de ${meta_ahorro:,.0f}{saludo}, con aportes "
+                    f"{etiqueta_frecuencia}es de ${aporte:,.0f}, necesitarías hacer aproximadamente "
+                    f"**{periodos_meta:.1f} aportes {etiqueta_frecuencia}es** (redondeando hacia arriba: "
+                    f"**{aportes_redondeados} aportes**), lo que equivale a **{anios_equivalentes:.1f} años**."
+                )
+
+        # ------------------------------------------------------------------
+        # PASO 2 (lo que ya existía): con el número de años que el usuario
+        # definió, y la frecuencia de aportes elegida, calculamos cuánto
+        # acumulan los aportes que efectivamente planea hacer.
+        # ------------------------------------------------------------------
+        vf_capital = valor_futuro(capital, tasa_periodo, n_periodos_totales)
+        vf_aportes = valor_futuro_anualidad(aporte, tasa_periodo, n_periodos_totales)
         vf_total = vf_capital + vf_aportes
         vf_real = ajustar_por_inflacion(vf_total, inflacion, anios)
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Valor Futuro (nominal)", f"${vf_total:,.2f}")
         m2.metric("Valor Futuro (real, ajustado por inflación)", f"${vf_real:,.2f}")
-        m3.metric("Total aportado", f"${capital + aporte*anios:,.2f}")
+        m3.metric(f"Total aportado ({n_periodos_totales} aportes {etiqueta_frecuencia}es)", f"${capital + aporte*n_periodos_totales:,.2f}")
 
-        # Gráfico de evolución año a año
-        valores = [valor_futuro(capital, tasa_anual, t) + valor_futuro_anualidad(aporte, tasa_anual, t) for t in range(anios + 1)]
+        # Gráfico de evolución año a año (cada punto del eje X es un año,
+        # aunque por dentro se estén componiendo aportes más frecuentes)
+        valores = [
+            valor_futuro(capital, tasa_periodo, t * periodos_por_anio) + valor_futuro_anualidad(aporte, tasa_periodo, t * periodos_por_anio)
+            for t in range(anios + 1)
+        ]
         fig, ax = plt.subplots()
         ax.plot(range(anios + 1), valores, marker="o")
         ax.set_xlabel("Año")
         ax.set_ylabel("Valor acumulado ($)")
-        ax.set_title("Crecimiento del capital en el tiempo")
+        ax.set_title(f"Crecimiento del capital en el tiempo (aportes {etiqueta_frecuencia}es)")
         ax.grid(True, alpha=0.3)
         st.pyplot(fig)
         plt.close(fig)  # libera memoria explícitamente (evita fuga de recursos entre recargas)
@@ -139,9 +219,9 @@ with tab2:
         m3.metric("Payback", f"{resultado['payback']:.2f} años" if resultado["payback"] is not None else "No se recupera")
 
         if resultado["conviene"]:
-            st.success("✅ El proyecto CONVIENE: el VAN es positivo, genera valor por encima del costo de capital.")
+            st.success(f"✅ Buenas noticias{saludo}: el proyecto CONVIENE — el VAN es positivo, genera valor por encima del costo de capital.")
         else:
-            st.error("❌ El proyecto NO conviene: el VAN es negativo o nulo.")
+            st.error(f"❌ Cuidado{saludo}: el proyecto NO conviene — el VAN es negativo o nulo.")
     except Exception as e:
         manejar_error("Evaluación de Proyectos", e)
 
@@ -150,6 +230,7 @@ with tab2:
 # ----------------------------------------------------------------------
 with tab3:
     st.header("Préstamos: Sistema Francés vs Sistema Alemán")
+    st.caption(f"Compara ambos sistemas de amortización{saludo} y decide cuál te conviene más.")
 
     col1, col2, col3 = st.columns(3)
     monto_prestamo = col1.number_input("Monto del préstamo ($)", min_value=0.0, value=10000.0, step=500.0)
@@ -257,7 +338,7 @@ with tab4:
         plt.close(fig)
 
         st.info(
-            "💡 **Cómo interpretarlo:** la banda ancha (P5–P95) muestra que el 90% de las "
+            f"💡 **Cómo interpretarlo{saludo}:** la banda ancha (P5–P95) muestra que el 90% de las "
             "simulaciones cayeron dentro de ese rango. Cambia el escenario macroeconómico "
             "arriba para ver cómo una crisis o un auge afectan tanto el resultado esperado "
             "como la incertidumbre alrededor de él."
@@ -271,14 +352,15 @@ with tab4:
 with tab5:
     st.header("Financiación de Posgrado en Colombia")
     st.write(
-        "Alcance del proyecto (**Opción A**): desembolso único, tasa constante "
+        f"Alcance del proyecto (**Opción A**){saludo}: desembolso único, tasa constante "
         "durante la simulación, sistema de cuota fija. Compara varias alternativas "
-        "reales (ICETEX, banco, fondo/cooperativa) y evalúa si te alcanza el bolsillo."
+        "reales (ICETEX, bancos, fondo/cooperativa) y evalúa si te alcanza el bolsillo."
     )
     st.caption(
-        "✅ Las tasas de las 3 primeras alternativas son **reales y verificadas** "
-        "(ICETEX, Davivienda, Bancoomeva) — ver la fuente de cada una abajo. Si "
-        "agregas más alternativas o cambias montos/plazos, edítalos según tu caso."
+        "✅ Las tasas de las 5 alternativas precargadas son **reales y verificadas** "
+        "(ICETEX, Davivienda, Bancoomeva, Bancolombia/Sufi, BBVA Colombia) — ver la "
+        "fuente de cada una abajo. Si agregas más alternativas o cambias montos/plazos, "
+        "edítalos según tu caso."
     )
     with st.expander("📎 Ver fuente y fecha de verificación de cada tasa"):
         for nombre, info in FUENTES_TASAS_COLOMBIA.items():
@@ -298,7 +380,7 @@ with tab5:
     umbral_endeudamiento_ui = c4.slider("Umbral endeudamiento total (%)", 10, 70, 40) / 100
 
     st.subheader("2. Alternativas de financiación a comparar")
-    n_alternativas = st.number_input("¿Cuántas alternativas quieres comparar?", min_value=1, max_value=10, value=3)
+    n_alternativas = st.number_input("¿Cuántas alternativas quieres comparar?", min_value=1, max_value=10, value=5)
 
     alternativas_input = []
     for i in range(int(n_alternativas)):
@@ -306,11 +388,11 @@ with tab5:
             "nombre": f"Alternativa {i+1}", "monto": 20_000_000, "tasa_anual": 0.15, "plazo_meses": 36,
         }
         cA, cB, cC, cD = st.columns(4)
-        nombre = cA.text_input("Nombre", value=ejemplo["nombre"], key=f"pg_nombre_{i}")
+        nombre_alt = cA.text_input("Nombre", value=ejemplo["nombre"], key=f"pg_nombre_{i}")
         monto = cB.number_input("Monto ($)", min_value=0.0, value=float(ejemplo["monto"]), step=500_000.0, key=f"pg_monto_{i}")
         tasa_pct = cC.number_input("Tasa anual (%)", min_value=0.0, value=ejemplo["tasa_anual"] * 100, step=0.5, key=f"pg_tasa_{i}")
         plazo = cD.number_input("Plazo (meses)", min_value=1, max_value=360, value=ejemplo["plazo_meses"], key=f"pg_plazo_{i}")
-        alternativas_input.append({"nombre": nombre, "monto": monto, "tasa_anual": tasa_pct / 100, "plazo_meses": int(plazo)})
+        alternativas_input.append({"nombre": nombre_alt, "monto": monto, "tasa_anual": tasa_pct / 100, "plazo_meses": int(plazo)})
 
     if st.button("Comparar alternativas"):
         try:
@@ -333,7 +415,7 @@ with tab5:
         tabla_comparativa = st.session_state["pg_tabla"]
         mejor = tabla_comparativa.iloc[0]
         st.success(
-            f"💡 La alternativa con **menor costo total** es **{mejor['nombre']}** "
+            f"💡 {nombre if nombre else 'Según los datos ingresados'}, la alternativa con **menor costo total** es **{mejor['nombre']}** "
             f"(costo total ${mejor['costo_total']:,.0f})."
         )
         st.dataframe(tabla_comparativa, use_container_width=True)
